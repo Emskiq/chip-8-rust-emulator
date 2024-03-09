@@ -50,6 +50,16 @@ impl fmt::Display for LoadInMemoryError {
     }
 }
 
+#[derive(Debug, PartialEq, Eq)]
+pub struct InstructionExecutionError;
+impl Error for InstructionExecutionError { }
+
+impl fmt::Display for InstructionExecutionError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Error in executing instruction!")
+    }
+}
+
 impl Default for Chip8 {
     fn default() -> Self {
         Chip8 {
@@ -78,10 +88,17 @@ impl Chip8 {
 
     pub fn cycle(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         // get/fetch opcode
-        let opcode = self.get_opcode()?;
+        let instruction_bytes = self.get_opcode_bytes();
 
         // decode opcode or match it
         //  + execute opcode
+        let instruction = Opcodes::try_from(instruction_bytes)?;
+
+        let advance_pc = self.execute_instruction(instruction, instruction_bytes)?;
+        if advance_pc {
+            self.pc += 2;
+        }
+
 
         // update timer
         if self.delay_timer > 0 {
@@ -90,7 +107,8 @@ impl Chip8 {
 
         if self.sound_timer > 0 {
             if self.sound_timer == 1 {
-                println!("TODO: Run SOUND");
+                // TODO: Run SOUND - external crate?
+                todo!();
             }
             self.sound_timer -= 1;
         }
@@ -98,14 +116,13 @@ impl Chip8 {
         Ok(())
     }
 
-    pub fn get_opcode(&self) -> Result<Opcodes, &str> {
-        Opcodes::try_from
-            (((self.memory[self.pc as usize] as u16) << 8)
-            | self.memory[self.pc as usize + 1] as u16)
+    pub fn get_opcode_bytes(&self) -> u16 {
+            ((self.memory[self.pc as usize] as u16) << 8)
+            | self.memory[self.pc as usize + 1] as u16
     }
 
     pub fn draw_graphics(&self) -> bool {
-        // this flag is set not on every cycle rather on these 2 opcodes
+        // This flag is being set to true on the following OpCodes (not on every cycle)
         // 0x00E0 - Clear Screen
         // 0xDXYN - Draw a sprite
         self.graphics
@@ -127,6 +144,31 @@ impl Chip8 {
         self.memory[LOADING_POINT..program_bytes.len() + LOADING_POINT].clone_from_slice(&program_bytes);
 
         Ok(())
+    }
+
+    fn execute_instruction(&mut self, instruction: Opcodes, instruction_bytes: u16) -> Result<bool, InstructionExecutionError> {
+        match instruction {
+            Opcodes::SysExecute => return Ok(true),
+            Opcodes::ClearScreen => {
+                self.graphics = true;
+                return Ok(true);
+            }
+            Opcodes::Return => {
+                self.pc = self.stack[(self.sp - 1) as usize];
+                self.sp -= 1;
+                return Ok(false);
+            }
+            Opcodes::SubRoutineExecute => {
+                self.stack[self.sp as usize] = self.pc;
+                self.sp += 1;
+                self.pc = instruction_bytes & 0x0FFF;
+                return Ok(false);
+            }
+
+            _ => todo!(),
+        }
+
+        Err(InstructionExecutionError)
     }
 }
 
