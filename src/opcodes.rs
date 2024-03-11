@@ -66,7 +66,7 @@ impl TryFrom<u16> for Opcodes {
                     0x8000 => Ok(Self::StoreRegInReg),
                     0x8001 => Ok(Self::ORReg),
                     0x8002 => Ok(Self::ANDReg),
-                    0x8003 => Ok(Self::AddValToReg),
+                    0x8003 => Ok(Self::XORReg),
                     0x8004 => Ok(Self::AddRegToReg),
                     0x8005 => Ok(Self::SubRegFromReg),
                     0x8006 => Ok(Self::StoreRegInRegShiftRight),

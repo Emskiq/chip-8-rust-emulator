@@ -1,12 +1,18 @@
+use std::usize;
 use std::{error::Error, fmt, fs::OpenOptions, io::Read, path::PathBuf};
 
+use rand::random;
+
 use crate::opcodes::Opcodes;
+use crate::stack::{Stack, StackError};
+use crate::utilities::{get_registers, get_register_and_value};
 
 pub const MEMORY_SIZE: usize = 4086;
 pub const GFX_SIZE: usize = 2048;
 pub const STACK_SIZE: usize = 16;
 
 pub const REGISTERS_COUNT: usize = 16;
+pub const CARY_REGISTER_IDX: usize = 0xF;
 
 pub const LOADING_POINT: usize = 0x200;
 
@@ -25,10 +31,8 @@ pub struct Chip8 {
     // program_counter (currently executing address)
     pc: u16,
 
-    // stack pointer (top element)
-    sp: u8,
-
-    stack: [u16; STACK_SIZE],
+    // program stack used to return when subroutine execute is called
+    stack: Stack<STACK_SIZE>,
 
     // timers counting in 60Hz refresh rate
     delay_timer: u8,
@@ -51,12 +55,18 @@ impl fmt::Display for LoadInMemoryError {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-pub struct InstructionExecutionError;
+pub struct InstructionExecutionError(pub &'static str);
 impl Error for InstructionExecutionError { }
 
 impl fmt::Display for InstructionExecutionError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Error in executing instruction!")
+        write!(f, "Error in executing instruction: {} ", self.0)
+    }
+}
+
+impl From<StackError> for InstructionExecutionError {
+    fn from(value: StackError) -> Self {
+        InstructionExecutionError(value.0)
     }
 }
 
@@ -67,8 +77,7 @@ impl Default for Chip8 {
             registers: [0; REGISTERS_COUNT],
             I: 0,
             pc: 0x200,
-            sp: 0,
-            stack: [0; STACK_SIZE],
+            stack: Stack::<STACK_SIZE>::new(),
             delay_timer: 0,
             sound_timer: 0,
             gfx: [0; GFX_SIZE],
@@ -87,20 +96,19 @@ impl Chip8 {
     }
 
     pub fn cycle(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        // get/fetch opcode
-        let instruction_bytes = self.get_opcode_bytes();
+        // get/fetch instruction
+        let instruction_bytes = self.get_instruction_bytes();
 
-        // decode opcode or match it
-        //  + execute opcode
+        // decode operation code of instruction
         let instruction = Opcodes::try_from(instruction_bytes)?;
 
+        // execute instruction
         let advance_pc = self.execute_instruction(instruction, instruction_bytes)?;
         if advance_pc {
             self.pc += 2;
         }
 
-
-        // update timer
+        // update timers
         if self.delay_timer > 0 {
             self.delay_timer -= 1;
         }
@@ -116,16 +124,18 @@ impl Chip8 {
         Ok(())
     }
 
-    pub fn get_opcode_bytes(&self) -> u16 {
+    pub fn get_instruction_bytes(&self) -> u16 {
             ((self.memory[self.pc as usize] as u16) << 8)
             | self.memory[self.pc as usize + 1] as u16
     }
 
-    pub fn draw_graphics(&self) -> bool {
+    pub fn draw_graphics(&mut self) -> bool {
         // This flag is being set to true on the following OpCodes (not on every cycle)
         // 0x00E0 - Clear Screen
         // 0xDXYN - Draw a sprite
-        self.graphics
+        let current_flag = self.graphics;
+        self.graphics = false;
+        current_flag
     }
 
     pub fn handle_key(&self) {
@@ -146,29 +156,246 @@ impl Chip8 {
         Ok(())
     }
 
+    // Returns bool flag if the PC shall be incremented or no + any errors occured
     fn execute_instruction(&mut self, instruction: Opcodes, instruction_bytes: u16) -> Result<bool, InstructionExecutionError> {
         match instruction {
             Opcodes::SysExecute => return Ok(true),
+
             Opcodes::ClearScreen => {
                 self.graphics = true;
                 return Ok(true);
             }
+
             Opcodes::Return => {
-                self.pc = self.stack[(self.sp - 1) as usize];
-                self.sp -= 1;
-                return Ok(false);
+                if let Some(saved_pc) = self.stack.top() {
+                    self.pc = saved_pc;
+                    let _ = self.stack.pop()?;
+                    return Ok(false);
+                }
+                else {
+                    return Err(InstructionExecutionError("Stack error"));
+                }
             }
-            Opcodes::SubRoutineExecute => {
-                self.stack[self.sp as usize] = self.pc;
-                self.sp += 1;
+
+            Opcodes::JumpTo => {
                 self.pc = instruction_bytes & 0x0FFF;
                 return Ok(false);
             }
 
-            _ => todo!(),
-        }
+            Opcodes::SubRoutineExecute => {
+                let _ = self.stack.push(self.pc)?;
+                self.pc = instruction_bytes & 0x0FFF;
+                return Ok(false);
+            }
 
-        Err(InstructionExecutionError)
+            Opcodes::SkipIfEqualVal => {
+                let (register_idx, value) = get_register_and_value(instruction_bytes)?;
+
+                if self.registers[register_idx] == value {
+                    self.pc += 4;
+                    return Ok(false);
+                }
+                else {
+                    return Ok(true);
+                }
+            }
+
+            Opcodes::SkipIfNotEqualVal => {
+                let (register_idx, value) = get_register_and_value(instruction_bytes)?;
+
+                if self.registers[register_idx] == value {
+                    self.pc += 4;
+                    return Ok(false);
+                }
+                else {
+                    return Ok(true);
+                }
+            }
+
+            Opcodes::SkipIfEqualReg => {
+                let (register_x_idx, register_y_idx) = get_registers(instruction_bytes)?;
+
+                if self.registers[register_x_idx] == self.registers[register_y_idx] {
+                    self.pc += 4;
+                    return Ok(false);
+                }
+                else {
+                    return Ok(true);
+                }
+            }
+
+            Opcodes::StoreValInReg => {
+                let (register_idx, value) = get_register_and_value(instruction_bytes)?;
+
+                self.registers[register_idx] = value;
+                return Ok(true);
+            }
+
+            Opcodes::AddValToReg => {
+                let (register_idx, value) = get_register_and_value(instruction_bytes)?;
+
+                self.registers[register_idx] += value;
+                return Ok(true);
+            }
+
+            Opcodes::StoreRegInReg => {
+                let (reg_x_idx, reg_y_idx) = get_registers(instruction_bytes)?;
+
+                self.registers[reg_x_idx] = self.registers[reg_y_idx];
+                return Ok(true);
+            }
+
+            Opcodes::ORReg => {
+                let (reg_x_idx, reg_y_idx) = get_registers(instruction_bytes)?;
+
+                self.registers[reg_x_idx] |= self.registers[reg_y_idx];
+                return Ok(true);
+            }
+
+            Opcodes::ANDReg => {
+                let (reg_x_idx, reg_y_idx) = get_registers(instruction_bytes)?;
+
+                self.registers[reg_x_idx] &= self.registers[reg_y_idx];
+                return Ok(true);
+            }
+
+            Opcodes::XORReg => {
+                let (reg_x_idx, reg_y_idx) = get_registers(instruction_bytes)?;
+
+                self.registers[reg_x_idx] ^= self.registers[reg_y_idx];
+                return Ok(true);
+            }
+
+            Opcodes::AddRegToReg => {
+                let (reg_x_idx, reg_y_idx) = get_registers(instruction_bytes)?;
+
+                let sum : u16 = self.registers[reg_x_idx] as u16 + self.registers[reg_y_idx] as u16;
+
+                if sum > 0xFF {
+                    self.registers[CARY_REGISTER_IDX] = 1; // carry
+                }
+                else {
+                    self.registers[CARY_REGISTER_IDX] = 0;
+                }
+
+                self.registers[reg_x_idx] = sum as u8;
+                return Ok(true);
+            }
+
+            Opcodes::SubRegFromReg => {
+                let (reg_x_idx, reg_y_idx) = get_registers(instruction_bytes)?;
+
+                let sum : i16 = self.registers[reg_x_idx] as i16 - self.registers[reg_y_idx] as i16;
+
+                if sum < 0 {
+                    self.registers[CARY_REGISTER_IDX] = 1; // carry
+                }
+                else {
+                    self.registers[CARY_REGISTER_IDX] = 0;
+                }
+
+                self.registers[reg_x_idx] = sum as u8;
+                return Ok(true);
+            }
+
+            Opcodes::StoreRegInRegShiftRight => {
+                let (reg_x_idx, reg_y_idx) = get_registers(instruction_bytes)?;
+
+                self.registers[CARY_REGISTER_IDX] = self.registers[reg_y_idx] & 0x1;
+                // !!! TODO:Check if we care about VY actually!!!
+                self.registers[reg_x_idx] = self.registers[reg_y_idx] >> 1;
+
+                return Ok(true);
+            }
+
+            Opcodes::SetRegMinusReg => {
+                let (reg_x_idx, reg_y_idx) = get_registers(instruction_bytes)?;
+
+                if self.registers[reg_x_idx] > self.registers[reg_y_idx] {
+                    self.registers[CARY_REGISTER_IDX] = 1;
+                }
+                else {
+                    self.registers[CARY_REGISTER_IDX] = 0;
+                }
+
+                self.registers[reg_x_idx] = self.registers[reg_y_idx] - self.registers[reg_x_idx];
+                return Ok(true);
+            }
+
+            Opcodes::StoreRegInRegShiftLeft => {
+                let (reg_x_idx, reg_y_idx) = get_registers(instruction_bytes)?;
+
+                self.registers[CARY_REGISTER_IDX] = self.registers[reg_y_idx] & 0x10;
+                // !!! TODO:Check if we care about VY actually!!!
+                self.registers[reg_x_idx] = self.registers[reg_y_idx] << 1;
+
+                return Ok(true);
+            }
+            
+            Opcodes::SkipIfNotEqualReg => {
+                let (register_x_idx, register_y_idx) = get_registers(instruction_bytes)?;
+
+                if self.registers[register_x_idx] != self.registers[register_y_idx] {
+                    self.pc += 4;
+                    return Ok(false);
+                }
+                else {
+                    return Ok(true);
+                }
+            }
+
+            Opcodes::StoreMemoryInAddr => {
+                let val = instruction_bytes & 0x0FFF;
+                self.I = val;
+                return Ok(true);
+            }
+
+            Opcodes::JumpToAddr => {
+                let val = instruction_bytes & 0x0FFF;
+                self.pc = val + self.registers[0] as u16;
+                return Ok(false);
+            }
+            
+            Opcodes::SetRandomNum => {
+                let (reg_x, value) = get_register_and_value(instruction_bytes)?;
+                let x = random::<u8>();
+                self.registers[reg_x] = x & value;
+
+                return Ok(true);
+            }
+
+            Opcodes::DrawSprite => {
+                let (x_reg, y_reg) = get_registers(instruction_bytes)?;
+                let height : usize = (instruction_bytes & 0x000F) as usize;
+                let mut pixel : u8;
+
+                self.registers[CARY_REGISTER_IDX] = 0;
+
+                // TODO: Think of the Rust idiomatic way of doing it
+                for y_line in 0usize..height {
+                    pixel = self.memory[self.I as usize + y_line];
+
+                    for x_line in 1usize..8 {
+                        if (pixel & (0x80 >> x_line)) != 0 {
+                            if self.gfx[x_reg + x_line + (y_reg + y_line) * 64] == 1 {
+                                self.registers[CARY_REGISTER_IDX] = 1;
+                            }
+
+                            self.gfx[x_reg + x_line + (y_reg + y_line) * 64] ^= 1;
+                        }
+                    }
+                }
+
+                self.graphics = true;
+                return Ok(true);
+            }
+
+            _ => {
+                dbg!(instruction);
+                dbg!(instruction_bytes);
+                todo!()
+            }
+        }
     }
 }
 

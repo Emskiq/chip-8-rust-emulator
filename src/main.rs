@@ -1,5 +1,7 @@
 mod chip8;
 mod opcodes;
+mod stack;
+mod utilities;
 
 use chip8::Chip8;
 
@@ -26,5 +28,5 @@ fn main() -> Result<()> {
 }
 
 fn draw_graphics() {
-    todo!()
+    println!("TODO: 'Drawing graphics'");
 }
