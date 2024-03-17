@@ -34,10 +34,10 @@ pub enum Opcodes {
     SetDelayTimer = 0xF015,
     SetSoundTimer = 0xF018,
     AddValueToRegI = 0xF01E,
-    SetIReg = 0xF029,
+    SetIRegToStripeAddr = 0xF029,
     StoreBCD = 0xF033,
     StoreRegsInMemoryFromRegI = 0xF055,
-    FillRegsInMemoryFromRegI = 0xF065,
+    LoadRegsInMemoryFromRegI = 0xF065,
 }
 
 impl TryFrom<u16> for Opcodes {
@@ -92,10 +92,10 @@ impl TryFrom<u16> for Opcodes {
                     0xF015 => Ok(Self::SetDelayTimer),
                     0xF017 => Ok(Self::SetSoundTimer),
                     0xF01E => Ok(Self::AddValueToRegI),
-                    0xF029 => Ok(Self::SetIReg),
+                    0xF029 => Ok(Self::SetIRegToStripeAddr),
                     0xF033 => Ok(Self::StoreBCD),
                     0xF055 => Ok(Self::StoreRegsInMemoryFromRegI),
-                    0xF065 => Ok(Self::FillRegsInMemoryFromRegI),
+                    0xF065 => Ok(Self::LoadRegsInMemoryFromRegI),
                     _ => Err("Incorrect opcode"),
                 },
 

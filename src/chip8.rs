@@ -1,4 +1,3 @@
-use std::usize;
 use std::{error::Error, fmt, fs::OpenOptions, io::Read, path::PathBuf};
 
 use rand::random;
@@ -10,6 +9,7 @@ use crate::utilities::{get_registers, get_register_and_value};
 pub const MEMORY_SIZE: usize = 4086;
 pub const GFX_SIZE: usize = 2048;
 pub const STACK_SIZE: usize = 16;
+pub const KEYS_SIZE: usize = 16;
 
 pub const REGISTERS_COUNT: usize = 16;
 pub const CARY_REGISTER_IDX: usize = 0xF;
@@ -42,6 +42,10 @@ pub struct Chip8 {
     gfx: [u8; GFX_SIZE],
 
     graphics: bool,
+
+    keys: [char; KEYS_SIZE],
+
+    key_reg_idx: usize,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -82,6 +86,8 @@ impl Default for Chip8 {
             sound_timer: 0,
             gfx: [0; GFX_SIZE],
             graphics: true,
+            keys: ['\0'; KEYS_SIZE],
+            key_reg_idx: REGISTERS_COUNT + 1,
         }
     }
 }
@@ -138,8 +144,10 @@ impl Chip8 {
         current_flag
     }
 
-    pub fn handle_key(&self) {
-        todo!()
+    pub fn handle_key(&mut self) {
+        if self.key_reg_idx != REGISTERS_COUNT + 1 {
+            self.registers[self.key_reg_idx] = get_key ();
+        }
     }
 
     fn load_program_in_memory (&mut self, program: PathBuf) -> Result<(), LoadInMemoryError> {
@@ -381,6 +389,9 @@ impl Chip8 {
                                 self.registers[CARY_REGISTER_IDX] = 1;
                             }
 
+                            // We have our 2-dimensinal array of gfx set into
+                            // 1 dimension 64 * 32 = 2048, so we need to get the
+                            // y line cordinate (row) by multipling with 64
                             self.gfx[x_reg + x_line + (y_reg + y_line) * 64] ^= 1;
                         }
                     }
@@ -390,6 +401,96 @@ impl Chip8 {
                 return Ok(true);
             }
 
+            Opcodes::SkipIfPressed => {
+                let (register_idx, _) = get_register_and_value(instruction_bytes)?;
+                let key_val = self.registers[register_idx];
+
+                if self.keys[key_val as usize] != '\0' {
+                    self.pc += 4;
+                    return Ok(false);
+                }
+
+                return Ok(true);
+            }
+
+            Opcodes::SkipIfNotPressed => {
+                let (register_idx, _) = get_register_and_value(instruction_bytes)?;
+                let key_val = self.registers[register_idx];
+
+                if self.keys[key_val as usize] == '\0' {
+                    self.pc += 4;
+                    return Ok(false);
+                }
+
+                return Ok(true);
+            }
+
+            Opcodes::StoreDelayTimer => {
+                let (reg_idx, _) = get_register_and_value(instruction_bytes)?;
+                self.registers[reg_idx] = self.delay_timer;
+                return Ok(true);
+            }
+
+            Opcodes::WaitKeypress => {
+                // TODO: See how to block the program
+                let (reg_idx, _) = get_register_and_value(instruction_bytes)?;
+                self.key_reg_idx = reg_idx;
+                return Ok(false);
+            }
+
+            Opcodes::SetDelayTimer => {
+                let (reg_idx, _) = get_register_and_value(instruction_bytes)?;
+                self.delay_timer = self.registers[reg_idx];
+                return Ok(true);
+            }
+
+            Opcodes::SetSoundTimer => {
+                let (reg_idx, _) = get_register_and_value(instruction_bytes)?;
+                self.sound_timer = self.registers[reg_idx];
+                return Ok(true);
+            }
+
+            Opcodes::AddValueToRegI => {
+                let (reg_idx, _) = get_register_and_value(instruction_bytes)?;
+                self.I += self.registers[reg_idx] as u16;
+                return Ok(true);
+            }
+
+            Opcodes::SetIRegToStripeAddr => {
+                // TODO
+                return Ok(true);
+            }
+
+            Opcodes::StoreBCD => {
+                let (reg_idx, _) = get_register_and_value(instruction_bytes)?;
+
+                self.memory[(self.I) as usize] = self.registers[reg_idx] / 100;
+                self.memory[(self.I + 1) as usize] = (self.registers[reg_idx] / 10) % 10;
+                self.memory[(self.I + 2) as usize] = (self.registers[reg_idx] % 100) % 10;
+
+                return Ok(true);
+            }
+
+            Opcodes::StoreRegsInMemoryFromRegI => {
+                let (reg_idx, _) = get_register_and_value(instruction_bytes)?;
+
+                for i in 0..reg_idx {
+                    self.memory[self.I as usize + i] = self.registers[i];
+                }
+
+                return Ok(true);
+            }
+
+            Opcodes::LoadRegsInMemoryFromRegI => {
+                let (reg_idx, _) = get_register_and_value(instruction_bytes)?;
+
+                for i in 0..reg_idx {
+                    self.registers[i] = self.memory[self.I as usize + i]
+                }
+                
+                return Ok(true);
+           }
+
             _ => {
                 dbg!(instruction);
                 dbg!(instruction_bytes);
@@ -398,4 +499,9 @@ impl Chip8 {
         }
     }
 }
+
+fn get_key() -> u8 {
+    todo!()
+}
+
 
