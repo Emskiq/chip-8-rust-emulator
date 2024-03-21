@@ -11,6 +11,9 @@ pub const GFX_SIZE: usize = 2048;
 pub const STACK_SIZE: usize = 16;
 pub const KEYS_SIZE: usize = 16;
 
+pub const SCREEN_WIDTH: usize = 64;
+pub const SCREEN_HEIGTH: usize = 32;
+
 pub const REGISTERS_COUNT: usize = 16;
 pub const CARY_REGISTER_IDX: usize = 0xF;
 
@@ -41,8 +44,13 @@ pub struct Chip8 {
     // the graphic screen
     gfx: [u8; GFX_SIZE],
 
+    // flag to update the graphics
     graphics: bool,
 
+    // Currently pressed/released key
+    key: u16,
+
+    // Current keys state (0x1 - 0xF)
     keys: [char; KEYS_SIZE],
 
     key_reg_idx: usize,
@@ -86,6 +94,7 @@ impl Default for Chip8 {
             sound_timer: 0,
             gfx: [0; GFX_SIZE],
             graphics: true,
+            key: 0,
             keys: ['\0'; KEYS_SIZE],
             key_reg_idx: REGISTERS_COUNT + 1,
         }
@@ -101,7 +110,9 @@ impl Chip8 {
         Ok(emulation)
     }
 
-    pub fn cycle(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn cycle(&mut self, key_pressed: u16) -> Result<(), Box<dyn std::error::Error>> {
+        self.key = key_pressed;
+
         // get/fetch instruction
         let instruction_bytes = self.get_instruction_bytes();
 
@@ -144,10 +155,9 @@ impl Chip8 {
         current_flag
     }
 
-    pub fn handle_key(&mut self) {
-        if self.key_reg_idx != REGISTERS_COUNT + 1 {
-            self.registers[self.key_reg_idx] = get_key ();
-        }
+    pub fn handle_key(&mut self, key: u8) {
+        // TODO: WIP
+        self.keys [key as usize] = key as char;
     }
 
     fn load_program_in_memory (&mut self, program: PathBuf) -> Result<(), LoadInMemoryError> {
@@ -484,6 +494,7 @@ impl Chip8 {
             Opcodes::LoadRegsInMemoryFromRegI => {
                 let (reg_idx, _) = get_register_and_value(instruction_bytes)?;
 
+                // TODO: Idiomatic way?
                 for i in 0..reg_idx {
                     self.registers[i] = self.memory[self.I as usize + i]
                 }
