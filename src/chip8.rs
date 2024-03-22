@@ -1,3 +1,4 @@
+use std::usize;
 use std::{error::Error, fmt, fs::OpenOptions, io::Read, path::PathBuf};
 
 use rand::random;
@@ -9,7 +10,7 @@ use crate::utilities::{get_registers, get_register_and_value};
 pub const MEMORY_SIZE: usize = 4086;
 pub const GFX_SIZE: usize = 2048;
 pub const STACK_SIZE: usize = 16;
-pub const KEYS_SIZE: usize = 16;
+pub const KEYS_SIZE: usize = 17; // If we press invalid key
 
 pub const SCREEN_WIDTH: usize = 64;
 pub const SCREEN_HEIGTH: usize = 32;
@@ -39,7 +40,9 @@ pub struct Chip8 {
 
     // timers counting in 60Hz refresh rate
     delay_timer: u8,
+
     sound_timer: u8,
+    run_sound: bool,
 
     // the graphic screen
     gfx: [u8; GFX_SIZE],
@@ -47,11 +50,8 @@ pub struct Chip8 {
     // flag to update the graphics
     graphics: bool,
 
-    // Currently pressed/released key
-    key: u16,
-
     // Current keys state (0x1 - 0xF)
-    keys: [char; KEYS_SIZE],
+    keys: [bool; KEYS_SIZE],
 
     key_reg_idx: usize,
 }
@@ -92,10 +92,10 @@ impl Default for Chip8 {
             stack: Stack::<STACK_SIZE>::new(),
             delay_timer: 0,
             sound_timer: 0,
+            run_sound: false,
             gfx: [0; GFX_SIZE],
             graphics: true,
-            key: 0,
-            keys: ['\0'; KEYS_SIZE],
+            keys: [false; KEYS_SIZE],
             key_reg_idx: REGISTERS_COUNT + 1,
         }
     }
@@ -110,8 +110,8 @@ impl Chip8 {
         Ok(emulation)
     }
 
-    pub fn cycle(&mut self, key_pressed: u16) -> Result<(), Box<dyn std::error::Error>> {
-        self.key = key_pressed;
+    pub fn cycle(&mut self, key: u8, is_pressed: bool) -> Result<(), Box<dyn std::error::Error>> {
+        self.handle_key(key, is_pressed);
 
         // get/fetch instruction
         let instruction_bytes = self.get_instruction_bytes();
@@ -132,8 +132,7 @@ impl Chip8 {
 
         if self.sound_timer > 0 {
             if self.sound_timer == 1 {
-                // TODO: Run SOUND - external crate?
-                todo!();
+                self.run_sound = true;
             }
             self.sound_timer -= 1;
         }
@@ -141,11 +140,12 @@ impl Chip8 {
         Ok(())
     }
 
-    pub fn get_instruction_bytes(&self) -> u16 {
+    fn get_instruction_bytes(&self) -> u16 {
             ((self.memory[self.pc as usize] as u16) << 8)
             | self.memory[self.pc as usize + 1] as u16
     }
 
+    // TODO: Do it smarter
     pub fn draw_graphics(&mut self) -> bool {
         // This flag is being set to true on the following OpCodes (not on every cycle)
         // 0x00E0 - Clear Screen
@@ -155,9 +155,19 @@ impl Chip8 {
         current_flag
     }
 
-    pub fn handle_key(&mut self, key: u8) {
-        // TODO: WIP
-        self.keys [key as usize] = key as char;
+    pub fn tone(&mut self) -> bool {
+        let current_flag = self.run_sound;
+        self.run_sound = false;
+        current_flag
+    }
+
+    pub fn handle_key(&mut self, key: u8, is_pressed: bool) {
+        if is_pressed {
+            self.keys [key as usize] = true;
+        }
+        else {
+            self.keys [key as usize] = false;
+        }
     }
 
     fn load_program_in_memory (&mut self, program: PathBuf) -> Result<(), LoadInMemoryError> {
@@ -252,7 +262,7 @@ impl Chip8 {
             Opcodes::AddValToReg => {
                 let (register_idx, value) = get_register_and_value(instruction_bytes)?;
 
-                self.registers[register_idx] += value;
+                self.registers[register_idx] = self.registers[register_idx].wrapping_add(value);
                 return Ok(true);
             }
 
@@ -415,7 +425,7 @@ impl Chip8 {
                 let (register_idx, _) = get_register_and_value(instruction_bytes)?;
                 let key_val = self.registers[register_idx];
 
-                if self.keys[key_val as usize] != '\0' {
+                if self.keys[key_val as usize] == true {
                     self.pc += 4;
                     return Ok(false);
                 }
@@ -427,7 +437,7 @@ impl Chip8 {
                 let (register_idx, _) = get_register_and_value(instruction_bytes)?;
                 let key_val = self.registers[register_idx];
 
-                if self.keys[key_val as usize] == '\0' {
+                if self.keys[key_val as usize] == false {
                     self.pc += 4;
                     return Ok(false);
                 }
@@ -501,12 +511,6 @@ impl Chip8 {
                 
                 return Ok(true);
            }
-
-            _ => {
-                dbg!(instruction);
-                dbg!(instruction_bytes);
-                todo!()
-            }
         }
     }
 }

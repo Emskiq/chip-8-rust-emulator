@@ -1,5 +1,8 @@
 use crate::chip8::{InstructionExecutionError, REGISTERS_COUNT};
 
+use sdl2::audio::{AudioCallback, AudioSpecDesired};
+
+////// Emulator utilities
 pub fn get_registers(instruction_bytes: u16) -> Result<(usize, usize), InstructionExecutionError> {
     let idx_x = (instruction_bytes & 0x0F00 >> 8) as usize;
     let idx_y = (instruction_bytes & 0x00F0 >> 4) as usize;
@@ -23,3 +26,32 @@ pub fn get_register_and_value(instruction_bytes: u16) -> Result<(usize, u8), Ins
         Ok((idx, val))
     }
 }
+
+////// Audio utilities
+pub struct SquareWave {
+    pub phase_inc: f32,
+    pub phase: f32,
+    pub volume: f32
+}
+
+impl AudioCallback for SquareWave {
+    type Channel = f32;
+
+    fn callback(&mut self, out: &mut [f32]) {
+        // Generate a square wave
+        for x in out.iter_mut() {
+            *x = if self.phase <= 0.5 {
+                self.volume
+            } else {
+                -self.volume
+            };
+            self.phase = (self.phase + self.phase_inc) % 1.0;
+        }
+    }
+}
+
+pub const DESIRED_AUDIO_SPEC: AudioSpecDesired = AudioSpecDesired {
+    freq: Some(44100),
+    channels: Some(1),  // mono
+    samples: None       // default sample size
+};

@@ -1,41 +1,18 @@
 extern crate sdl2;
-extern crate phf;
 
 mod chip8;
 mod opcodes;
 mod stack;
 mod utilities;
 
-use phf::phf_map;
-
+use sdl2::event::Event;
+use sdl2::keyboard::Keycode;
 use sdl2::pixels::Color;
+use utilities::{SquareWave, DESIRED_AUDIO_SPEC};
 
-use std::fmt::{write, Debug};
-use std::io::{Write, stdout, stdin};
-use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 use chip8::Chip8;
-
-// TODO: Think whether we need separate class for the KEYBOARD Functionalities
-static KEYS_MAP: phf::Map<char, u8> = phf_map! {
-    '1' => 0x1,
-    '2' => 0x2,
-    '3' => 0x3,
-    '4' => 0xc,
-    'q' => 0x4,
-    'w' => 0x5,
-    'e' => 0x6,
-    'r' => 0xD,
-    'a' => 0x7,
-    's' => 0x8,
-    'd' => 0x9,
-    'f' => 0xE,
-    'z' => 0xA,
-    'x' => 0x0,
-    'c' => 0xB,
-    'v' => 0xF,
-};
 
 pub const SCALE : u32 = 16;
 
@@ -55,6 +32,15 @@ fn run(emulator: &mut Chip8) -> Result<()> {
     let sdl_context = sdl2::init()?;
     let video_subsystem = sdl_context.video()?;
     let audio_subsystem = sdl_context.audio()?;
+
+    let audio = audio_subsystem.open_playback(None, &DESIRED_AUDIO_SPEC, |spec| {
+        // initialize the audio callback
+        SquareWave {
+            phase_inc: 440.0 / spec.freq as f32,
+            phase: 0.0,
+            volume: 0.25,
+        }
+    })?;
 
     let window = video_subsystem.window("chip-8 emulator",
         chip8::SCREEN_WIDTH as u32 * SCALE, // TODO: Make the scale to be read from CLAP
@@ -76,12 +62,80 @@ fn run(emulator: &mut Chip8) -> Result<()> {
     let frame_duration = Duration::new(0, 1_000_000_000u32 / 60);
     let mut timestamp = Instant::now();
 
-    let key_pressed: u16 = 0x0;
+    let mut key: u8 = 0;
+    let mut is_pressed = false;
+
     'running: loop {
-        // Detect the key pressed - TODO...
+        canvas.clear();
+
+        // Key handling
+        for event in event_pump.poll_iter() {
+            match event {
+                Event::Quit {..} |
+
+                // Key press
+                Event::KeyDown { keycode: Some(Keycode::Escape), .. } => break 'running,
+                Event::KeyDown { keycode: Some(keycode), .. } => {
+                    is_pressed = true;
+                    match keycode {
+                        Keycode::Num1 => key = 0x1,
+                        Keycode::Num2 => key = 0x2,
+                        Keycode::Num3 => key = 0x3,
+                        Keycode::Num4 => key = 0xC,
+                        Keycode::Q    => key = 0x4,
+                        Keycode::W    => key = 0x5,
+                        Keycode::E    => key = 0x6,
+                        Keycode::R    => key = 0xD,
+                        Keycode::A    => key = 0x7,
+                        Keycode::S    => key = 0x8,
+                        Keycode::D    => key = 0x9,
+                        Keycode::F    => key = 0xE,
+                        Keycode::Z    => key = 0xA,
+                        Keycode::X    => key = 0x0,
+                        Keycode::C    => key = 0xB,
+                        Keycode::V    => key = 0xF,
+                        _             => key = 16,
+                    }
+                }
+
+                // Key release
+                Event::KeyUp { keycode: Some(Keycode::Escape), ..} => break 'running,
+                Event::KeyUp { keycode: Some(keycode), .. } => {
+                    is_pressed = false;
+                    match keycode {
+                        Keycode::Num1 => key = 0x1,
+                        Keycode::Num2 => key = 0x2,
+                        Keycode::Num3 => key = 0x3,
+                        Keycode::Num4 => key = 0xC,
+                        Keycode::Q    => key = 0x4,
+                        Keycode::W    => key = 0x5,
+                        Keycode::E    => key = 0x6,
+                        Keycode::R    => key = 0xD,
+                        Keycode::A    => key = 0x7,
+                        Keycode::S    => key = 0x8,
+                        Keycode::D    => key = 0x9,
+                        Keycode::F    => key = 0xE,
+                        Keycode::Z    => key = 0xA,
+                        Keycode::X    => key = 0x0,
+                        Keycode::C    => key = 0xB,
+                        Keycode::V    => key = 0xF,
+                        _             => key = 16,
+                    }
+                }
+
+                _ => {}
+            }
+        }
 
         // Pass it to our emulator and execute opcode
-        emulator.cycle(key_pressed)?; // maybe here add the key
+        emulator.cycle(key, is_pressed)?; // maybe here add the key
+
+        if emulator.tone() {
+            audio.resume()
+        }
+        else {
+            audio.pause();
+        }
 
         // Draw graphics
         /// Probably we will write graphics everytime
@@ -90,12 +144,16 @@ fn run(emulator: &mut Chip8) -> Result<()> {
         //     draw_graphics();
         // }
 
-        // FPS
-        let now = Instant::now();
-        let sleep_dur = frame_duration
-            .checked_sub(now.saturating_duration_since(timestamp))
-            .unwrap_or(Duration::new(0, 0));
-        ::std::thread::sleep(sleep_dur);
-        timestamp = now;
+        canvas.present();
+        // FPS - first check with the basic one
+        ::std::thread::sleep(Duration::new(0, 1_000_000_000u32 / 60));
+        // let now = Instant::now();
+        // let sleep_dur = frame_duration
+        //     .checked_sub(now.saturating_duration_since(timestamp))
+        //     .unwrap_or(Duration::new(0, 0));
+        // ::std::thread::sleep(sleep_dur);
+        // timestamp = now;
     }
+
+    Ok(())
 }
