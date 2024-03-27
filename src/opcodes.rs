@@ -1,7 +1,8 @@
 // Here define the opcodes as the list suggests with the enum case probably
 // Got to look how to assign values to enums
+use enum_stringify::EnumStringify;
 
-#[derive(Debug)]
+#[derive(Debug, EnumStringify)]
 pub enum Opcodes {
     SysExecute = 0x0000,
     ClearScreen = 0x00E0,
@@ -90,7 +91,7 @@ impl TryFrom<u16> for Opcodes {
                     0xF007 => Ok(Self::StoreDelayTimer),
                     0xF00A => Ok(Self::WaitKeypress),
                     0xF015 => Ok(Self::SetDelayTimer),
-                    0xF017 => Ok(Self::SetSoundTimer),
+                    0xF018 => Ok(Self::SetSoundTimer),
                     0xF01E => Ok(Self::AddValueToRegI),
                     0xF029 => Ok(Self::SetIRegToStripeAddr),
                     0xF033 => Ok(Self::StoreBCD),
