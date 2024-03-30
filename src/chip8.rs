@@ -2,7 +2,6 @@ use std::{isize, usize};
 use std::{error::Error, fmt, fs::OpenOptions, io::Read, path::PathBuf};
 
 use rand::random;
-use log::debug;
 
 use crate::opcodes::Opcodes;
 use crate::stack::{Stack, StackError};
@@ -30,13 +29,12 @@ const SPRITE_CHARS_ADDR: u16 = 0x0000;
 
 pub const MEMORY_SIZE: usize = 4086;
 pub const STACK_SIZE: usize = 16;
-pub const KEYS_SIZE: usize = 17; // If we press invalid key
 
 pub const SCREEN_WIDTH: usize = 64;
 pub const SCREEN_HEIGTH: usize = 32;
 
 pub const REGISTERS_COUNT: usize = 16;
-pub const CARY_REGISTER_IDX: usize = 0xF;
+pub const CARRY_REGISTER_IDX: usize = 0xF;
 
 pub const LOADING_POINT: usize = 0x200;
 
@@ -70,7 +68,7 @@ pub struct Chip8 {
     gfx: [u8; SCREEN_WIDTH * SCREEN_HEIGTH / 8],
 
     // Current keys state (0x1 - 0xF)
-    keys: [bool; KEYS_SIZE],
+    keypad: u16,
 
     // time in seconds for executing operation
     time: isize,
@@ -124,7 +122,7 @@ impl Default for Chip8 {
             sound_timer: 0,
             run_sound: false,
             gfx: [0; SCREEN_WIDTH * SCREEN_HEIGTH / 8],
-            keys: [false; KEYS_SIZE],
+            keypad: 0,
             time: 0,
         }
     }
@@ -140,20 +138,21 @@ impl Chip8 {
         Ok(emulation)
     }
 
-    pub fn cycle(&mut self, key: u8, is_pressed: bool) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn cycle(&mut self, key: u16) -> Result<(), Box<dyn std::error::Error>> {
         // store pressed key
-        self.handle_key(key, is_pressed);
+        self.keypad = key;
 
         // update timers
         if self.delay_timer > 0 {
             self.delay_timer -= 1;
         }
-        if self.sound_timer > 0 {
-            if self.sound_timer == 1 {
-                self.run_sound = true;
-            }
+
+        self.run_sound = if self.sound_timer != 0 {
             self.sound_timer -= 1;
-        }
+            true
+        } else {
+            false
+        };
 
         // --- Execution of an instruction in a FRAME
         self.time += FRAME_TIME;
@@ -164,11 +163,9 @@ impl Chip8 {
 
             // get/fetch instruction
             let instruction_bytes = self.get_instruction_bytes();
-            // debug!("intstruction bytes: {:#06x}", instruction_bytes);
 
             // decode operation code of instruction
             let instruction = Opcodes::try_from(instruction_bytes)?;
-            // debug!("intstruction bytes: {:#06x} -> {}", instruction_bytes, instruction);
 
             // execute instruction + get overtime that it takes to be executed originally
             let overtime = self.execute_instruction(instruction, instruction_bytes)?;
@@ -186,18 +183,7 @@ impl Chip8 {
     }
 
     pub fn tone(&mut self) -> bool {
-        let current_flag = self.run_sound;
-        self.run_sound = false;
-        current_flag
-    }
-
-    pub fn handle_key(&mut self, key: u8, is_pressed: bool) {
-        if is_pressed {
-            self.keys [key as usize] = true;
-        }
-        else {
-            self.keys [key as usize] = false;
-        }
+        self.run_sound
     }
 
     fn load_program_in_memory (&mut self, program: PathBuf) -> Result<(), LoadInMemoryError> {
@@ -218,8 +204,8 @@ impl Chip8 {
         Ok(())
     }
 
-    // Returns bool flag if the PC shall be incremented or no + any errors occured
-    // TODO: Return actually only overtime w/out advance_pc - it is less coe if you add it here
+    // Returns overtime value which corresponds to the time taken for one
+    // instruction to be executed + any errors occured
     fn execute_instruction(&mut self, instruction: Opcodes, instruction_bytes: u16) -> Result<isize, InstructionExecutionError> {
         match instruction {
             Opcodes::SysExecute => return Ok(100),
@@ -256,8 +242,6 @@ impl Chip8 {
 
             Opcodes::SkipIfEqualVal => {
                 let (register_idx, value) = get_register_and_value(instruction_bytes)?;
-
-                // debug!("Skip if reg: {} == val {}", self.registers[register_idx], value);
 
                 if self.registers[register_idx] == value {
                     self.pc += 4;
@@ -298,7 +282,6 @@ impl Chip8 {
             Opcodes::StoreValInReg => {
                 let (register_idx, value) = get_register_and_value(instruction_bytes)?;
 
-                // debug!("Store Val {} in Reg IDX {}", value, register_idx);
                 self.registers[register_idx] = value;
                 self.pc += 2;
                 return Ok(27);
@@ -333,7 +316,6 @@ impl Chip8 {
             Opcodes::ANDReg => {
                 let (reg_x_idx, reg_y_idx) = get_registers(instruction_bytes)?;
 
-                // debug!("AND REGistets {} &= {}", self.registers[reg_x_idx], self.registers[reg_y_idx]);
                 self.registers[reg_x_idx] &= self.registers[reg_y_idx];
 
                 self.pc += 2;
@@ -353,16 +335,15 @@ impl Chip8 {
                 let (reg_x_idx, reg_y_idx) = get_registers(instruction_bytes)?;
 
                 let sum : u16 = self.registers[reg_x_idx] as u16 + self.registers[reg_y_idx] as u16;
+                self.registers[reg_x_idx] = self.registers[reg_x_idx].wrapping_add(self.registers[reg_y_idx]);
 
                 if sum > 0xFF {
-                    self.registers[CARY_REGISTER_IDX] = 1; // carry
+                    self.registers[CARRY_REGISTER_IDX] = 1; // carry
                 }
                 else {
-                    self.registers[CARY_REGISTER_IDX] = 0;
+                    self.registers[CARRY_REGISTER_IDX] = 0;
                 }
 
-                self.registers[reg_x_idx] = sum as u8;
-                
                 self.pc += 2;
                 return Ok(45);
             }
@@ -370,17 +351,16 @@ impl Chip8 {
             Opcodes::SubRegFromReg => {
                 let (reg_x_idx, reg_y_idx) = get_registers(instruction_bytes)?;
 
-                let sum : i16 = self.registers[reg_x_idx] as i16 - self.registers[reg_y_idx] as i16;
+                let set_carry = self.registers[reg_x_idx] >= self.registers[reg_y_idx];
+                self.registers[reg_x_idx] = self.registers[reg_x_idx].wrapping_sub(self.registers[reg_y_idx]);
 
-                if sum < 0 {
-                    self.registers[CARY_REGISTER_IDX] = 1; // carry
+                if set_carry {
+                    self.registers[CARRY_REGISTER_IDX] = 1; // carry
                 }
                 else {
-                    self.registers[CARY_REGISTER_IDX] = 0;
+                    self.registers[CARRY_REGISTER_IDX] = 0;
                 }
 
-                self.registers[reg_x_idx] = sum as u8;
-                
                 self.pc += 2;
                 return Ok(200);
             }
@@ -388,8 +368,8 @@ impl Chip8 {
             Opcodes::StoreRegInRegShiftRight => {
                 let (reg_x_idx, reg_y_idx) = get_registers(instruction_bytes)?;
 
-                self.registers[CARY_REGISTER_IDX] = self.registers[reg_y_idx] & 0b00000001;
-                self.registers[reg_x_idx] = self.registers[reg_y_idx] >> 1;
+                self.registers[CARRY_REGISTER_IDX] = self.registers[reg_y_idx] & 0b00000001;
+                self.registers[reg_x_idx] = self.registers[reg_y_idx].wrapping_shr(1);
 
                 self.pc += 2;
                 return Ok(200);
@@ -398,14 +378,15 @@ impl Chip8 {
             Opcodes::SetRegMinusReg => {
                 let (reg_x_idx, reg_y_idx) = get_registers(instruction_bytes)?;
 
-                if self.registers[reg_x_idx] > self.registers[reg_y_idx] {
-                    self.registers[CARY_REGISTER_IDX] = 1;
+                let set_carry = self.registers[reg_y_idx] >= self.registers[reg_x_idx];
+                self.registers[reg_x_idx] = self.registers[reg_y_idx].wrapping_sub(self.registers[reg_x_idx]);
+
+                if set_carry {
+                    self.registers[CARRY_REGISTER_IDX] = 1;
                 }
                 else {
-                    self.registers[CARY_REGISTER_IDX] = 0;
+                    self.registers[CARRY_REGISTER_IDX] = 0;
                 }
-
-                self.registers[reg_x_idx] = self.registers[reg_y_idx] - self.registers[reg_x_idx];
 
                 self.pc += 2;
                 return Ok(200);
@@ -414,8 +395,8 @@ impl Chip8 {
             Opcodes::StoreRegInRegShiftLeft => {
                 let (reg_x_idx, reg_y_idx) = get_registers(instruction_bytes)?;
 
-                self.registers[CARY_REGISTER_IDX] = (self.registers[reg_x_idx] & 0b10000000) >> 7;
-                self.registers[reg_x_idx] = self.registers[reg_y_idx] << 1;
+                self.registers[CARRY_REGISTER_IDX] = (self.registers[reg_x_idx] & 0b10000000) >> 7;
+                self.registers[reg_x_idx] = self.registers[reg_y_idx].wrapping_shl(1);
 
                 self.pc += 2;
                 return Ok(200);
@@ -436,7 +417,6 @@ impl Chip8 {
 
             Opcodes::StoreMemoryInAddr => {
                 let val = instruction_bytes & 0x0FFF;
-                // debug!("Store val {} in memory I", val);
                 self.i = val;
                 self.pc += 2;
                 return Ok(55);
@@ -464,8 +444,6 @@ impl Chip8 {
                 let pos_x = self.registers[x_reg] % 64;
                 let pos_y = self.registers[y_reg] % 32;
 
-                debug!("pos_x: {}, pos_y: {}", pos_x, pos_y);
-
                 let gfx = &mut self.gfx;
                 let shift = pos_x % 8;
                 let col_a = pos_x as usize / 8;
@@ -485,7 +463,7 @@ impl Chip8 {
                         *fb_b ^= b;
                     }
                 }
-                self.registers[CARY_REGISTER_IDX] = if collision != 0 { 1 } else { 0 }; 
+                self.registers[CARRY_REGISTER_IDX] = if collision != 0 { 1 } else { 0 }; 
 
                 self.pc += 2;
                 return Ok(22734);
@@ -495,14 +473,12 @@ impl Chip8 {
                 let (register_idx, _) = get_register_and_value(instruction_bytes)?;
                 let key_val = self.registers[register_idx];
 
-                debug!("Skip if pressed key {}", key_val);
-
-                if self.keys[key_val as usize] == true {
+                if 1 << key_val & self.keypad != 0 {
                     self.pc += 4;
-                    return Ok(73);
+                } else {
+                    self.pc += 2;
                 }
 
-                self.pc += 2;
                 return Ok(73);
             }
 
@@ -510,15 +486,12 @@ impl Chip8 {
                 let (register_idx, _) = get_register_and_value(instruction_bytes)?;
                 let key_val = self.registers[register_idx];
 
-                debug!("Skip if NOT pressed key {}", key_val);
-
-
-                if self.keys[key_val as usize] == false {
+                if 1 << key_val & self.keypad == 0 {
                     self.pc += 4;
-                    return Ok(73);
+                } else {
+                    self.pc += 2;
                 }
 
-                self.pc += 2;
                 return Ok(73);
             }
 
@@ -532,13 +505,14 @@ impl Chip8 {
             Opcodes::WaitKeypress => {
                 let (reg_idx, _) = get_register_and_value(instruction_bytes)?;
 
-                for i in 0..self.keys.len() {
-                    if self.keys[i] {
+                for i in 0..0x10 {
+                    if 1 << i & self.keypad != 0 {
                         self.registers[reg_idx] = i as u8;
                         self.pc += 2;
-                        return Ok(200);
+                        break;
                     }
                 }
+
                 return Ok(200);
             }
 
@@ -578,8 +552,6 @@ impl Chip8 {
                 let d1 = v / 10;
                 let v = v - d1 * 10;
                 let d0 = v / 1;
-                
-                debug!("storing bcds of REG IDX {} : {}, {}, {}", reg_idx, d2, d1, d0);
 
                 self.memory[(self.i) as usize] = d2;
                 self.memory[(self.i + 1) as usize] = d1;

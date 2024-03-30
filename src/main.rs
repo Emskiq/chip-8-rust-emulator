@@ -1,5 +1,4 @@
 extern crate sdl2;
-extern crate env_logger;
 
 mod chip8;
 mod opcodes;
@@ -9,10 +8,13 @@ mod utilities;
 use sdl2::{event::Event, pixels::PixelFormatEnum};
 use sdl2::keyboard::Keycode;
 use sdl2::pixels::Color;
-use utilities::{SquareWave, DESIRED_AUDIO_SPEC};
+
+use clap::Parser;
 
 use std::time::{Duration, Instant};
+use std::path::PathBuf;
 
+use utilities::{SquareWave, DESIRED_AUDIO_SPEC};
 use chip8::Chip8;
 
 pub const SCALE : u32 = 16;
@@ -20,17 +22,31 @@ pub const SCALE : u32 = 16;
 pub type Error = Box<dyn std::error::Error>;
 pub type Result<T> = std::result::Result<T, Error>;
 
-// Probably CLAP needed to parse the game file name and pass it to our emulator...
-fn main() -> Result<()> {
+#[derive(Parser, Debug)]
+#[command(author, version, about, long_about = None)]
+struct Cli {
+    program_file: PathBuf,
 
-    env_logger::init();
-    // The emulator core
-    // here load it with the parsed argument - game + scale
-    let mut emulator = Chip8::new("c8games/TETRIS".into())?;
-    run(&mut emulator)
+    #[arg(short)]
+    scale: Option<u8>,
 }
 
-fn run(emulator: &mut Chip8) -> Result<()> {
+fn main() -> Result<()> {
+    let cli = Cli::parse();
+
+    // The emulator core
+    // here load it with the parsed argument - game + scale
+    let mut emulator = Chip8::new(cli.program_file)?;
+
+    if let Some(scale) = cli.scale {
+        run(&mut emulator, scale as u32)
+    }
+    else {
+        run (&mut emulator, SCALE)
+    }
+}
+
+fn run(emulator: &mut Chip8, scale: u32) -> Result<()> {
     // Set up the Front-end of the emulator using SDL-2
     let sdl_context = sdl2::init()?;
     let video_subsystem = sdl_context.video()?;
@@ -46,8 +62,8 @@ fn run(emulator: &mut Chip8) -> Result<()> {
     })?;
 
     let window = video_subsystem.window("chip-8 emulator",
-        chip8::SCREEN_WIDTH as u32 * SCALE, // TODO: Make the scale to be read from CLAP
-        chip8::SCREEN_HEIGTH as u32 * SCALE,
+        chip8::SCREEN_WIDTH as u32 * scale,
+        chip8::SCREEN_HEIGTH as u32 * scale,
         )
         .position_centered()
         .build()
@@ -74,71 +90,71 @@ fn run(emulator: &mut Chip8) -> Result<()> {
     let frame_duration = Duration::new(0, 1_000_000_000u32 / 60);
     let mut timestamp = Instant::now();
 
-    let mut key: u8 = 16;
-    let mut is_pressed = false;
+    let mut key = 0u16;
 
     'running: loop {
         // Key handling
         for event in event_pump.poll_iter() {
             match event {
-                Event::Quit {..} |
-
-                // Key press
-                Event::KeyDown { keycode: Some(Keycode::Escape), .. } => break 'running,
-                Event::KeyDown { keycode: Some(keycode), .. } => {
-                    is_pressed = true;
-                    match keycode {
-                        Keycode::Num1 => key = 0x1,
-                        Keycode::Num2 => key = 0x2,
-                        Keycode::Num3 => key = 0x3,
-                        Keycode::Num4 => key = 0xC,
-                        Keycode::Q    => key = 0x4,
-                        Keycode::W    => key = 0x5,
-                        Keycode::E    => key = 0x6,
-                        Keycode::R    => key = 0xD,
-                        Keycode::A    => key = 0x7,
-                        Keycode::S    => key = 0x8,
-                        Keycode::D    => key = 0x9,
-                        Keycode::F    => key = 0xE,
-                        Keycode::Z    => key = 0xA,
-                        Keycode::X    => key = 0x0,
-                        Keycode::C    => key = 0xB,
-                        Keycode::V    => key = 0xF,
-                        _             => key = 16, // invalid key
-                    }
+                Event::Quit { .. }
+                | Event::KeyDown {
+                    keycode: Some(Keycode::Escape),
+                    ..
+                } => break 'running,
+                Event::KeyDown {
+                    keycode: Some(keycode),
+                    ..
+                } => {
+                    key |= match keycode {
+                        Keycode::Num1 => 1 << 0x1,
+                        Keycode::Num2 => 1 << 0x2,
+                        Keycode::Num3 => 1 << 0x3,
+                        Keycode::Num4 => 1 << 0xC,
+                        Keycode::Q => 1 << 0x4,
+                        Keycode::W => 1 << 0x5,
+                        Keycode::E => 1 << 0x6,
+                        Keycode::R => 1 << 0xD,
+                        Keycode::A => 1 << 0x7,
+                        Keycode::S => 1 << 0x8,
+                        Keycode::D => 1 << 0x9,
+                        Keycode::F => 1 << 0xE,
+                        Keycode::Z => 1 << 0xA,
+                        Keycode::X => 1 << 0x0,
+                        Keycode::C => 1 << 0xB,
+                        Keycode::V => 1 << 0xF,
+                        _ => 0,
+                    };
                 }
-
-                // Key release
-                Event::KeyUp { keycode: Some(Keycode::Escape), ..} => break 'running,
-                Event::KeyUp { keycode: Some(keycode), .. } => {
-                    is_pressed = false;
-                    match keycode {
-                        Keycode::Num1 => key = 0x1,
-                        Keycode::Num2 => key = 0x2,
-                        Keycode::Num3 => key = 0x3,
-                        Keycode::Num4 => key = 0xC,
-                        Keycode::Q    => key = 0x4,
-                        Keycode::W    => key = 0x5,
-                        Keycode::E    => key = 0x6,
-                        Keycode::R    => key = 0xD,
-                        Keycode::A    => key = 0x7,
-                        Keycode::S    => key = 0x8,
-                        Keycode::D    => key = 0x9,
-                        Keycode::F    => key = 0xE,
-                        Keycode::Z    => key = 0xA,
-                        Keycode::X    => key = 0x0,
-                        Keycode::C    => key = 0xB,
-                        Keycode::V    => key = 0xF,
-                        _             => key = 16, // invalid key
-                    }
+                Event::KeyUp {
+                    keycode: Some(keycode),
+                    ..
+                } => {
+                    key &= !match keycode {
+                        Keycode::Num1 => 1 << 0x1,
+                        Keycode::Num2 => 1 << 0x2,
+                        Keycode::Num3 => 1 << 0x3,
+                        Keycode::Num4 => 1 << 0xC,
+                        Keycode::Q => 1 << 0x4,
+                        Keycode::W => 1 << 0x5,
+                        Keycode::E => 1 << 0x6,
+                        Keycode::R => 1 << 0xD,
+                        Keycode::A => 1 << 0x7,
+                        Keycode::S => 1 << 0x8,
+                        Keycode::D => 1 << 0x9,
+                        Keycode::F => 1 << 0xE,
+                        Keycode::Z => 1 << 0xA,
+                        Keycode::X => 1 << 0x0,
+                        Keycode::C => 1 << 0xB,
+                        Keycode::V => 1 << 0xF,
+                        _ => 0,
+                    };
                 }
-
                 _ => {}
             }
         }
 
         // Pass it to our emulator and execute opcode
-        emulator.cycle(key, is_pressed)?;
+        emulator.cycle(key)?;
 
         // Audio
         if emulator.tone() {
