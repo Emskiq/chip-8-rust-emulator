@@ -1,11 +1,11 @@
 # Chip-8 Rust emulator
 
+Yet another [Chip-8](https://en.m.wikipedia.org/wiki/CHIP-8) emulator written in Rust, marking the third step of my _Rust auditor_ journey. This project is following the previous [PngMe](https://github.com/Emskiq/pngme/tree/main) project, which actually suggested doing this emulator.
 
-This is an emulator written for the [Chip-8](https://en.m.wikipedia.org/wiki/CHIP-8) written in Rust,
-marking the third step of my _Rust auditor_ journey.
+I would say this project is perfect for you, *if you have previous experience with programming*. [Laurence Muller](https://multigesture.net/about/) couldn't summurize it better in his [blogpost](https://multigesture.net/articles/how-to-write-an-emulator-chip-8-interpreter/)<br>
+- _Don’t use this project as a way to learn how to program. (If bitwise operations confuse you, study them first)_
 
-If you are doing something similar to me in Rust learning and programming at whole
-I would say this project is perfect for you, *if you have previous experience with programming*
+[Image here/GIF]()
 
 # Overview
 - basically tell the people that this project shall be started 
