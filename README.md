@@ -55,7 +55,7 @@ I highly recommend checking out these two excellent resources that essentially p
 - [C/C++ emulator with pseudo code and logic](https://multigesture.net/articles/how-to-write-an-emulator-chip-8-interpreter/)
 - [Rust emulator with pseudo code and logic](https://dhole.github.io/post/chip8_emu_1/)
 
-## My Main Takeaways:
+## My Main Takeaways
 
 - ### Game Loop/Cycle
 
