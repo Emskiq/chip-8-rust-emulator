@@ -45,7 +45,7 @@ The project delves into various topics in Rust and programming, including:
    ./target/debug/chip-8 [OPTIONS] <PROGRAM_FILE>
     ```
 
-_You can set the scale in the options by typing `-s 16` e.g._
+_You can set the scale in the options by typing `-s 8` e.g. (by default is `16`)_
 
 # Implementation
 
@@ -99,11 +99,25 @@ pub fn new(program: PathBuf) -> Result<Self, LoadInMemoryError>  {
 }
 ```
 
-- ### Keyboard
+   - ### Keyboard and Graphics
+   
+Handling key input and displaying graphics were among the most challenging aspects of development. Thorough articles on how to tackle these tasks were scarce, and I couldn't find any third-party suggestions either.
 
-- ### Graphics
+Ultimately, I opted to use the implementation from the [Rust example repository](https://dhole.github.io/post/chip8_emu_1/) mentioned above. This implementation proved to be solid and the best resource available in terms of explanation and ease of adapting similar implementations for my emulator code.
+
+The implementation utilizes SDL2, which offers both key detection functionality and graphics handling. It's somewhat _magical_ how SDL2 precisely handles graphics, but the implementation worked flawlessly with my code (which was heavily influenced by the Rust repository mentioned earlier 😅).
 
 
-# Resources and possibly some guidance 
+# Resources
 
+Here is a list of helpful resources that I actively referred to during development:
 
+- [CHIP-8 Wiki Documentation](https://en.m.wikipedia.org/wiki/CHIP-8) and [Alternative Documentation](https://github.com/mattmikolay/chip-8/wiki/CHIP‐8-Technical-Reference): The processor documentation/technical reference is always your main resource when writing an emulator.
+- [Rust Example Repo](https://dhole.github.io/post/chip8_emu_1/) Without this repository I was _fucked_.
+- [Chip-8 emulator testsuite Repo](https://github.com/Timendus/chip8-test-suite) Without these tests I _couldn't finish_ the project. 
+- [SDL2 Crate](https://github.com/Rust-SDL2/rust-sdl2): This crate handles the keyboard and graphics of the emulator, as mentioned earlier.
+- [CLAP Documentation on accepting arguments](https://docs.rs/clap/latest/clap/_derive/_tutorial/chapter_2/index.html): CLAP was perfect for polishing my project by defining the options and arguments that I wanted to pass to the executable and execute the program.
+- [Operators and Symbols in Rust](https://doc.rust-lang.org/book/appendix-02-operators.html): Understanding symbols in Rust is crucial when working with bits and bytes.
+- [Wrapped Add/Sub in Rust](https://doc.rust-lang.org/stable/std/?search=wrapping): Understanding why Rust promotes privacy and is used in blockchains like Solana.
+- [Enum to String Crate](https://crates.io/crates/enum-stringify) and [Logger Crate](https://docs.rs/crate/env_logger/latest)
+- [Termion](https://github.com/redox-os/termion/blob/master/examples/keys.rs): Although not used in the final implementation, it was fun experimenting with this amazing crate.
